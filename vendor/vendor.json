@@ -133,6 +133,12 @@
 			"revisionTime": "2017-06-12T17:47:53Z"
 		},
 		{
+			"checksumSHA1": "nFF7uw5VwrJ2EqSIBCvf4PqwzOI=",
+			"path": "github.com/google/gops",
+			"revision": "0bf845d3d5a1a8b1c4ce85e9595b937eb220863c",
+			"revisionTime": "2021-03-30T22:56:06Z"
+		},
+		{
 			"checksumSHA1": "Nf/pN/E1Rutz925nyJR4eEeghwg=",
 			"origin": "k8s.io/client-go/vendor/github.com/googleapis/gnostic/OpenAPIv2",
 			"path": "github.com/googleapis/gnostic/OpenAPIv2",

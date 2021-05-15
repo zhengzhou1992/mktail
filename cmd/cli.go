@@ -18,14 +18,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"text/template"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/clientcmd"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
@@ -56,6 +60,7 @@ type Options struct {
 	completion       string
 	template         string
 	output           string
+	multiple         bool
 }
 
 var opts = &Options{
@@ -65,6 +70,7 @@ var opts = &Options{
 	color:          "auto",
 	template:       "",
 	output:         "default",
+	multiple:       true,
 }
 
 func Run() {
@@ -92,6 +98,7 @@ func Run() {
 	cmd.Flags().StringVar(&opts.completion, "completion", opts.completion, "Outputs stern command-line completion code for the specified shell. Can be 'bash' or 'zsh'")
 	cmd.Flags().StringVar(&opts.template, "template", opts.template, "Template to use for log lines, leave empty to use --output flag")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", opts.output, "Specify predefined template. Currently support: [default, raw, json]")
+	cmd.Flags().BoolVarP(&opts.multiple, "multiple", "m", opts.multiple, "enable multiple kubernetes mode")
 
 	// Specify custom bash completion function
 	cmd.BashCompletionFunction = bash_completion_func
@@ -127,15 +134,30 @@ func Run() {
 			os.Exit(2)
 		}
 
+		kubeConfigs, err := getKubeConfig(opts)
+		if err != nil {
+			return err
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = stern.Run(ctx, config)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		wg := sync.WaitGroup{}
+		for _, kubeConfig := range kubeConfigs {
+			configForCluster := *config
+			configForCluster.KubeConfig = kubeConfig
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 
+				err = stern.Run(ctx, &configForCluster)
+				if err != nil {
+					fmt.Println(err)
+				}
+			}()
+
+		}
+		wg.Wait()
 		return nil
 	}
 
@@ -145,10 +167,6 @@ func Run() {
 }
 
 func parseConfig(args []string) (*stern.Config, error) {
-	kubeConfig, err := getKubeConfig()
-	if err != nil {
-		return nil, err
-	}
 
 	var podQuery string
 	if len(args) == 0 {
@@ -269,7 +287,6 @@ func parseConfig(args []string) (*stern.Config, error) {
 	}
 
 	return &stern.Config{
-		KubeConfig:            kubeConfig,
 		PodQuery:              pod,
 		ContainerQuery:        container,
 		ExcludeContainerQuery: excludeContainer,
@@ -287,24 +304,70 @@ func parseConfig(args []string) (*stern.Config, error) {
 	}, nil
 }
 
-func getKubeConfig() (string, error) {
-	var kubeconfig string
+func getKubeConfig(opts *Options) (configFiles []string, err error) {
 
-	if kubeconfig = opts.kubeConfig; kubeconfig != "" {
-		return kubeconfig, nil
+	defer func() {
+		//	remove dup
+		seen := make(map[string]bool)
+
+		deDupConfigs := configFiles[:0]
+		for _, cStr := range configFiles {
+			c, e := clientcmd.LoadFromFile(cStr)
+			if e != nil {
+				log.Printf("failed to load config from path: %s, err: %v\n", cStr, e)
+				continue
+			}
+			cfg := clientcmd.NewDefaultClientConfig(*c, &clientcmd.ConfigOverrides{
+				CurrentContext: opts.context,
+			})
+			restConf, e := cfg.ClientConfig()
+			if e != nil {
+				log.Printf("failed to get client config from path: %s, err: %v\n", cStr, e)
+				continue
+			}
+			hostPath := path.Join(restConf.Host, restConf.APIPath)
+			if seen[hostPath] {
+				log.Printf("api server %s config has seen, skipped\n", hostPath)
+				continue
+			}
+			seen[hostPath] = true
+			deDupConfigs = append(deDupConfigs, cStr)
+		}
+		configFiles = deDupConfigs
+	}()
+
+	if kubeconfig := opts.kubeConfig; kubeconfig != "" {
+		configFiles = append(configFiles, kubeconfig)
+		if !opts.multiple {
+			return
+		}
 	}
-
-	if kubeconfig = os.Getenv("KUBECONFIG"); kubeconfig != "" {
-		return kubeconfig, nil
+	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+		configFiles = append(configFiles, kubeconfig)
+		if !opts.multiple {
+			return
+		}
 	}
 
 	// kubernetes requires an absolute path
 	home, err := homedir.Dir()
 	if err != nil {
-		return "", errors.Wrap(err, "failed to get user home directory")
+		err = errors.Wrap(err, "failed to get user home directory")
+		return
 	}
 
-	kubeconfig = filepath.Join(home, ".kube/config")
+	rootPath := filepath.Join(home, ".kube")
 
-	return kubeconfig, nil
+	files, err := ioutil.ReadDir(rootPath)
+	if err != nil {
+		return
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		configFiles = append(configFiles, filepath.Join(rootPath, f.Name()))
+	}
+
+	return
 }

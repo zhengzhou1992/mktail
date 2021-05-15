@@ -14,8 +14,15 @@
 
 package main
 
-import "github.com/wercker/stern/cmd"
+import (
+	"github.com/google/gops/agent"
+	"github.com/wercker/stern/cmd"
+	"log"
+)
 
 func main() {
+	if err := agent.Listen(agent.Options{}); err != nil {
+		log.Fatal(err)
+	}
 	cmd.Run()
 }
