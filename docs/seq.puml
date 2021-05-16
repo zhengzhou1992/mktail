@@ -1,0 +1,55 @@
+@startuml
+autoactivate off
+
+actor "小川" as User
+participant stern
+participant "Pod watcher" as watcher
+participant "Delete handler" as delHandler
+participant "Add handler" as addHandler
+participant "G for abc" as abcTailer
+participant "G for xyz" as xyzTailer
+participant "API Server" as apiServer
+participant "log output" as output
+
+activate User
+User -> stern : stern frontend --selector\nrelease=canary
+activate stern
+
+stern -> watcher : start watcher
+activate watcher
+activate addHandler
+activate delHandler
+watcher -> apiServer: start watch
+apiServer -> watcher: new xyz pod
+watcher -> addHandler: new xyz pod
+    group log stream for xyz pod
+        addHandler -> xyzTailer: new gorutine for abc pod
+        activate xyzTailer
+        xyzTailer -> apiServer: log stream req
+        apiServer --> xyzTailer: log content...
+        xyzTailer --> output: log content...
+        apiServer --> xyzTailer: log content...
+        xyzTailer --> output: log content...
+        apiServer --> xyzTailer: log content...
+        xyzTailer --> output: log content...
+    end
+
+
+apiServer -> watcher: new abc pod
+watcher -> addHandler: new abc pod
+    group log stream for abc pod
+        addHandler -> abcTailer: new gorutine for xyz pod
+        activate abcTailer
+        abcTailer -> apiServer: log stream req
+        apiServer --> abcTailer: log content...
+        abcTailer --> output: log content...
+        apiServer --> abcTailer: log content...
+        abcTailer --> output: log content...
+        apiServer --> abcTailer: log content...
+        abcTailer --> output: log content...
+    end
+apiServer -> watcher: del xyz Pod
+watcher -> delHandler: del xyz Pod
+delHandler ->x xyzTailer: termiate gorutine for xyz
+deactivate xyzTailer
+@enduml

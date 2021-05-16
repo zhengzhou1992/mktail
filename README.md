@@ -1,6 +1,6 @@
 # mktail
 
-mktail (multiple kubernetes tail) is a tool for tailing multiple kubernetes clusters pods logs.  It is based on the open source [Stern](https://github.com/wercker/stern) project . 
+mktail (multiple kubernetes tail) is a tool for tailing **multiple** kubernetes clusters pods logs at **same time**.  It is based on the open source [Stern](https://github.com/wercker/stern) project . 
 
 ## Example
 ```bash
